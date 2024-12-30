@@ -1,7 +1,7 @@
 from main import *
 
 
-# 디렉토리 구조 정의
+# 디렉토리 구조 정의 main.py와 files은 같은 위치에 있음
 directory_structure = {
     "files": {
         "calibration info": None,
