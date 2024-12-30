@@ -16,7 +16,6 @@ directory_structure = {
         },
         "noise detection result": None,
         "noise sample": None,
-        "noise_determined": None,
         "raw": None,
         "uncalibrated datavolt": None
     }
