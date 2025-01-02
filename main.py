@@ -7,7 +7,7 @@ from numba import njit
 
 # 그림 그리기용 라이브러리
 import matplotlib.pyplot as plt
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 
 # 파일 디렉토리 생성
@@ -56,14 +56,14 @@ def raw_to_datavolt(file_path):
 
 # raw 파일을 datavolt array로 변환 및 저장 np.int16
 def save_raw_to_datavolt(run, board):
-    file_path = f"files/datavolt/datavolt_{run}_{board}.npy"
+    file_path = f"files/raw/raw_{run}_{board}.dat"
     # 파일에서 run, board 넘버? 로 구분된 것 같아 이를 파일 이름에 표기
     datavolt = raw_to_datavolt(file_path)
     np.save(file_path, datavolt)
     print(f"datavolt {run} {board} file saved as {file_path}")
 
 
-# raw 파일에서 이벤트 별 마지막 TDC에 해당하는 DRS4 chip cell의 헤더 정보를 추출
+# raw 파일의 헤더에서 event end cell number에 대응되는 정보를 추출
 def raw_to_header(file_path):
     # 파일 전체를 읽기
     with open(file_path, 'rb') as file:
@@ -93,13 +93,46 @@ def raw_to_header(file_path):
     return header_info
 
 
-# raw 파일에서 헤더 정보를 추출하여 저장 np.int16
+# raw 파일의 헤더에서 event end cell number에 대응되는 정보를 추출하여 저장 np.int16
 def save_raw_to_header(run, board):
-    file_path = f"files/header/header_{run}_{board}.npy"
+    file_path = f"files/raw/raw_{run}_{board}.dat"
     # 파일에서 run, board 넘버? 로 구분된 것 같아 이를 파일 이름에 표기
     header = raw_to_header(file_path)
     np.save(f"files/header/header_{run}_{board}.npy", header)
     print(f"header {run} {board} file saved as files/header/header_{run}_{board}.npy")
+
+
+# raw 파일에서 나머지 헤더를 이것은 추출은 아니고 단순하게 한번에 plt로 나타내기
+def plot_extra_header(run, board):
+    file_path = f"files/raw/raw_{run}_{board}.dat"
+
+    # 파일 전체를 읽기
+    with open(file_path, 'rb') as file:
+        file_data = np.frombuffer(file.read(), dtype=np.uint8)
+
+    # 파일 크기를 기반으로 이벤트 크기 계산
+    file_size_in_bytes = os.path.getsize(file_path)
+    event_size = int(file_size_in_bytes * 8 / (16 * 16 * 4096))  # 16채널, 4096 데이터 포인트 가정
+    extra_header_pos = list(range(0, 32, 2)) + list(range(48, 64, 2))
+
+    for header_pos in extra_header_pos:
+
+        header_info = np.full(event_size, -1, dtype=np.uint16)
+
+        for i in range(event_size):
+            # 시작 위치 계산
+            start_position = 32 * 4096 * i + header_pos
+            data_high = file_data[start_position]
+            data_low = file_data[start_position + 1]
+            data_pairs = (data_low.astype(np.uint16) << 8) | data_high.astype(np.uint16)
+            header_info[i] = data_pairs
+
+        plot_single_array(header_info, f"Header. {header_pos // 2}",
+                          "Event", "Header Value",
+                          ylim=[np.min(header_info) - 10, np.max(header_info) + 10],
+                          mode="line", datatype="else",
+                          points=None, span=None,
+                          show=1, save=0, path=None)
 
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -465,15 +498,7 @@ def plot_find_ratio_simulation(iteration_number=100,
         color = 'blue' if a == 0 else 'red'  # a == 0이면 파랑, 그렇지 않으면 빨강
         plt.scatter(x, y, color=color)
 
-    # loaded_points 에 있는 x, y, z에서
-    # y > threshold 로 범위에서의 모든 a값이 0이 되게하는 threshold의 최솟값을 게산
-    threshold = (
-        min(point[1] for point in shift_and_score_ratio if
-            all(p[2] == 0 for p in shift_and_score_ratio if p[1] > point[1])))
-
-    int_part = int(threshold)  # 정수 부분만 가져옴
-    if threshold > int_part:
-        threshold = int_part + 1
+    threshold = 2
 
     # 그 후 y축에서 x축과 평행하게 얇은 빨간 점선을 표시 후 그 threshold 라벨 표시
     plt.axhline(y=threshold, color='red', linestyle='--', linewidth=1, label=f'Threshold: {threshold}')
@@ -741,7 +766,6 @@ def noise_region_detect(run, board):
                         edge_list.append(region[0])
                         edge_list.append(region[1])
 
-                # 노이즈가 있는데 없을 수 있나?
                 if edge_list:
                     noise_start = np.min(edge_list)
                     noise_end = min(np.max(edge_list), 4093)
@@ -844,7 +868,7 @@ def noise_region_detect(run, board):
             noise_end = max(noise_end, bounded_regions[1])
             types += 10
 
-        # 최종적을 잘라내기
+        # 최종적으로 잘라내기
         if noise_start < 10:
             noise_start = 0
         if noise_end > 4093 - 10:
@@ -1093,7 +1117,7 @@ def plot_single_array(array, title, xaxis, yaxis,
 # file_path에 있는 모든 이미지를 length (초) 시간 만큼 하나의 gif로 이름을 name으로 해서 생성
 def gif_generator(files_path, length, name):
     """
-    주어진 파일 경로의 모든 이미지를 하나의 GIF로 생성합니다.
+    주어진 파일 경로의 모든 이미지를 하나의 GIF로 생성하며, 진행률 표시를 추가합니다.
 
     Parameters:
     - files_path (str): 이미지가 저장된 디렉토리 경로
@@ -1102,7 +1126,7 @@ def gif_generator(files_path, length, name):
     """
     # 이미지 파일 로드
     images = []
-    valid_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.gif')  # 유효한 이미지 확장자
+    valid_extensions = ('.png', '.jpg')  # 유효한 이미지 확장자
     for file_name in sorted(os.listdir(files_path)):  # 정렬된 파일 리스트
         if file_name.lower().endswith(valid_extensions):  # 확장자 확인
             images.append(Image.open(os.path.join(files_path, file_name)))
@@ -1114,17 +1138,46 @@ def gif_generator(files_path, length, name):
     # 프레임당 시간 계산
     duration = int((length / len(images)) * 1000)  # 각 프레임 시간 (ms)
 
+    # 진행률 표시 추가
+    processed_images = []
+    font = ImageFont.load_default()  # 기본 폰트 사용
+    for i, img in enumerate(images):
+        # 새로운 이미지 생성 (캔버스 크기 확장)
+        width, height = img.size
+        new_height = height + 30  # progress bar 공간 추가
+        new_image = Image.new("RGB", (width, new_height), "white")
+        new_image.paste(img, (0, 0))
+
+        # 진행률 계산
+        progress = int((i + 1) / len(images) * 100)
+
+        # 진행률 바 그리기
+        draw = ImageDraw.Draw(new_image)
+        progress_bar_width = int((i + 1) / len(images) * width)
+        draw.rectangle([0, height, progress_bar_width, new_height], fill="blue")
+
+        # 진행률 텍스트 추가
+        text = f"{progress}%"
+        text_bbox = draw.textbbox((0, 0), text, font=font)  # 텍스트 크기 계산
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        text_position = ((width - text_width) // 2, height + (30 - text_height) // 2)
+        draw.text(text_position, text, fill="black", font=font)
+
+        # 가공된 이미지 추가
+        processed_images.append(new_image)
+
     # GIF 저장 경로
     gif_path = os.path.join(files_path, f"{name}.gif")
 
     # GIF 생성 및 저장
     print("Starting GIF creation...")
-    images[0].save(
+    processed_images[0].save(
         gif_path,
         save_all=True,
-        append_images=images[1:],  # 한 번에 모든 프레임 추가
+        append_images=processed_images[1:],  # 한 번에 모든 프레임 추가
         duration=duration,
         loop=0,
     )
 
-    print(f"{name} saved as {files_path}{name}.gif")
+    print(f"{name} saved as {gif_path}")
