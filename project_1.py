@@ -6,6 +6,7 @@ from tkinter import filedialog
 # 설정된 변수
 run = 103
 board = 10
+test = 10
 
 # GUI로 파일 선택
 root = tk.Tk()
